@@ -98,6 +98,21 @@ jobs:
           ECR_REPOSITORY: ${{ vars.ECR_REPOSITORY }}
           LAUNCH_TEMPLATE_ID: ${{ vars.LAUNCH_TEMPLATE_ID }}
         run: |
+          if [ -z "${LAUNCH_TEMPLATE_ID}" ]; then
+            echo "::error::LAUNCH_TEMPLATE_ID repository variable is not set."
+            exit 1
+          fi
+
+          if [[ "${LAUNCH_TEMPLATE_ID}" == it-* ]]; then
+            echo "::warning::LAUNCH_TEMPLATE_ID starts with 'it-'. EC2 launch template IDs start with 'lt-', so this workflow will use the corrected prefix."
+            LAUNCH_TEMPLATE_ID="lt-${LAUNCH_TEMPLATE_ID#it-}"
+          fi
+
+          if [[ ! "${LAUNCH_TEMPLATE_ID}" =~ ^lt-[0-9a-fA-F]+$ ]]; then
+            echo "::error::LAUNCH_TEMPLATE_ID must be an EC2 launch template ID like lt-xxxxxxxxxxxxxxxxx. Got '${LAUNCH_TEMPLATE_ID}'."
+            exit 1
+          fi
+
           ECR_URI="${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com/${ECR_REPOSITORY}"
 
           USER_DATA=$(cat <<'USERDATA' | sed "s|__IMAGE_TAG__|${IMAGE_TAG}|g; s|__AWS_ACCOUNT_ID__|${AWS_ACCOUNT_ID}|g; s|__AWS_REGION__|${AWS_REGION}|g; s|__ECR_REPOSITORY__|${ECR_REPOSITORY}|g" | base64 -w 0
