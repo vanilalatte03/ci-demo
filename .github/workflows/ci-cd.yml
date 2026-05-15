@@ -97,10 +97,32 @@ jobs:
           AWS_REGION: ${{ vars.AWS_REGION }}
           ECR_REPOSITORY: ${{ vars.ECR_REPOSITORY }}
           LAUNCH_TEMPLATE_ID: ${{ vars.LAUNCH_TEMPLATE_ID }}
+          ASG_NAME: ${{ vars.ASG_NAME }}
         run: |
-          if [ -z "${LAUNCH_TEMPLATE_ID}" ]; then
-            echo "::error::LAUNCH_TEMPLATE_ID repository variable is not set."
+          if [ -z "${ASG_NAME}" ]; then
+            echo "::error::ASG_NAME repository variable is not set."
             exit 1
+          fi
+
+          ASG_LAUNCH_TEMPLATE_ID=$(aws autoscaling describe-auto-scaling-groups \
+            --auto-scaling-group-names "${ASG_NAME}" \
+            --query 'AutoScalingGroups[0].LaunchTemplate.LaunchTemplateId' \
+            --output text)
+
+          if [ -z "${ASG_LAUNCH_TEMPLATE_ID}" ] || [ "${ASG_LAUNCH_TEMPLATE_ID}" = "None" ]; then
+            ASG_LAUNCH_TEMPLATE_ID=$(aws autoscaling describe-auto-scaling-groups \
+              --auto-scaling-group-names "${ASG_NAME}" \
+              --query 'AutoScalingGroups[0].MixedInstancesPolicy.LaunchTemplate.LaunchTemplateSpecification.LaunchTemplateId' \
+              --output text)
+          fi
+
+          if [ -z "${ASG_LAUNCH_TEMPLATE_ID}" ] || [ "${ASG_LAUNCH_TEMPLATE_ID}" = "None" ]; then
+            echo "::error::Could not find a launch template attached to Auto Scaling group '${ASG_NAME}'. Check ASG_NAME and AWS_REGION."
+            exit 1
+          fi
+
+          if [ -z "${LAUNCH_TEMPLATE_ID}" ]; then
+            LAUNCH_TEMPLATE_ID="${ASG_LAUNCH_TEMPLATE_ID}"
           fi
 
           if [[ "${LAUNCH_TEMPLATE_ID}" == it-* ]]; then
@@ -110,6 +132,18 @@ jobs:
 
           if [[ ! "${LAUNCH_TEMPLATE_ID}" =~ ^lt-[0-9a-fA-F]+$ ]]; then
             echo "::error::LAUNCH_TEMPLATE_ID must be an EC2 launch template ID like lt-xxxxxxxxxxxxxxxxx. Got '${LAUNCH_TEMPLATE_ID}'."
+            exit 1
+          fi
+
+          if ! aws ec2 describe-launch-templates --launch-template-ids "${LAUNCH_TEMPLATE_ID}" >/dev/null 2>&1; then
+            if [ "${LAUNCH_TEMPLATE_ID}" != "${ASG_LAUNCH_TEMPLATE_ID}" ]; then
+              echo "::warning::Configured LAUNCH_TEMPLATE_ID '${LAUNCH_TEMPLATE_ID}' was not found in this AWS account/region. Using launch template '${ASG_LAUNCH_TEMPLATE_ID}' from Auto Scaling group '${ASG_NAME}'."
+              LAUNCH_TEMPLATE_ID="${ASG_LAUNCH_TEMPLATE_ID}"
+            fi
+          fi
+
+          if ! aws ec2 describe-launch-templates --launch-template-ids "${LAUNCH_TEMPLATE_ID}" >/dev/null 2>&1; then
+            echo "::error::Launch template '${LAUNCH_TEMPLATE_ID}' was not found. Check AWS_ROLE_ARN, AWS_REGION, ASG_NAME, and LAUNCH_TEMPLATE_ID repository variables."
             exit 1
           fi
 
